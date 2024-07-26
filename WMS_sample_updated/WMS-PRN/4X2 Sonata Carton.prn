@@ -1,0 +1,44 @@
+Seagull:2.1:DP
+                    INPUT OFF
+                    VERBOFF
+                    INPUT ON
+                    SYSVAR(48) = 0
+                    ERROR 15,"FONT NOT FOUND"
+                    ERROR 18,"DISK FULL"
+                    ERROR 26,"PARAMETER TOO LARGE"
+                    ERROR 27,"PARAMETER TOO SMALL"
+                    ERROR 37,"CUTTER DEVICE NOT FOUND"
+                    ERROR 1003,"FIELD OUT OF LABEL"
+                    SYSVAR(35)=0
+                    OPEN "tmp:setup.sys" FOR OUTPUT AS #1
+                    PRINT#1,"Printing,Media,Print Area,Media Margin (X),0"
+                    PRINT#1,"Printing,Media,Clip Default,On"
+                    CLOSE #1
+                    SETUP "tmp:setup.sys"
+                    KILL "tmp:setup.sys"
+                    CLIP ON
+                    CLIP BARCODE ON
+                    LBLCOND 3,2
+                    CLL
+                    OPTIMIZE "BATCH" ON
+                    PP51,383:AN7
+                    NASC 8
+                    FT "Andale Mono Bold"
+                    FONTSIZE 12
+                    FONTSLANT 0
+                    PT "Batch"
+                    PP239,383:PT "s0007"
+                    PP47,346:PT "Item code"
+                    PP229,346:PT "SONFG002"
+                    PP51,305:PT "EXP.Date"
+                    PP239,305:PT "2024-07-13"
+                    PP53,268:PT "MRP"
+                    PP241,268:PT "2133"
+                    PP54,230:PT "SN#"
+                    PP242,230:PT "3"
+                    PP155,171:BARSET "QRCODE",1,1,7,2,1
+                    PB "CSONFG0020724s00070003"
+                    LAYOUT RUN ""
+                    PF
+                    PRINT KEY OFF
+                    

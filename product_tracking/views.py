@@ -498,21 +498,40 @@ def create_production_order(request):
                           ['item_code', 'batch', 'item_mrp', 'mfg_date', 'exp_date', 'qty', 'polybag_weight', 'line_no',
                            'product_name'] if not request.POST.get(field)]
         if missing_fields:
+            print(f"Missing fields: {missing_fields}")
             return JsonResponse({'status': 'error', 'message': f'Missing fields: {", ".join(missing_fields)}'},
                                 status=400)
 
+        # Validate field formats
         try:
             qty = int(qty)
         except ValueError:
+            print("Invalid quantity format.")
             return JsonResponse({'status': 'error', 'message': 'Invalid quantity format.'}, status=400)
+
+        try:
+            polybag_weight = float(polybag_weight)
+        except ValueError:
+            print("Invalid polybag weight format.")
+            return JsonResponse({'status': 'error', 'message': 'Invalid polybag weight format.'}, status=400)
 
         try:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT item_id FROM item_master WHERE item_code = %s", [item_code])
                 item = cursor.fetchone()
                 if not item:
+                    print("Invalid item code.")
                     return JsonResponse({'status': 'error', 'message': 'Invalid item code.'}, status=400)
                 item_id = item[0]
+
+                # Check for duplicate item id and batch
+                cursor.execute("SELECT COUNT(*) FROM production_order WHERE item_id = %s AND batch = %s",
+                               [item_id, batch])
+                duplicate_count = cursor.fetchone()[0]
+                if duplicate_count > 0:
+                    print("Duplicate item code and batch not allowed.")
+                    return JsonResponse({'status': 'error', 'message': 'Duplicate item code and batch not allowed.'},
+                                        status=400)
 
             created_date = datetime.now()
 
@@ -521,13 +540,15 @@ def create_production_order(request):
 
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT create_production_order(%s::integer, %s::character varying, %s::character varying, %s::date, %s::date, %s::integer, %s::integer, %s:: timestamp without time zone, %s::character varying, %s::character varying, %s::numeric)",
+                    "SELECT create_production_order(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
                         item_id, batch, item_mrp, mfg_date, exp_date, qty, created_by, created_date, product_name,
                         line_no, polybag_weight
                     ])
+                production_order_number = cursor.fetchone()[0]  # Fetch the returned production order number
 
-            return JsonResponse({'status': 'success', 'message': 'Production order created successfully'})
+            return JsonResponse({'status': 'success', 'message': 'Production order created successfully',
+                                 'production_order_number': production_order_number})
 
         except Exception as e:
             logger.error(f"Unhandled exception: {e}")
@@ -937,13 +958,15 @@ def get_production_order_numbers_by_line(request):
         return JsonResponse({'error': 'An error occurred while fetching production order numbers'}, status=500)
 
 
+@csrf_exempt
 def get_product_details_by_order(request, production_order_no):
     logger.info(f"Fetching details for production order: {production_order_no}")
     try:
+        line_no = request.session.get('line_number', 'N/A')
         with connection.cursor() as cursor:
             cursor.execute(
-                '''SELECT item_id, batch, item_mrp, "MFG_date", "EXP_date", qty 
-                FROM production_order 
+                ''' SELECT item_id, batch, item_mrp, "MFG_date", "EXP_date", qty, polybag_weight
+                FROM production_order
                 WHERE production_order_number = %s AND polybag_print_status = false''',
                 [production_order_no])
             row = cursor.fetchone()
@@ -952,13 +975,19 @@ def get_product_details_by_order(request, production_order_no):
                 logger.warning(f"No data found for production order {production_order_no}")
                 return JsonResponse({'error': 'Production order not found'}, status=404)
 
-            item_id, batch, item_mrp, mfg_date, exp_date, qty = row
+            item_id, batch, item_mrp, mfg_date, exp_date, qty, polybag_weight = row
             cursor.execute("SELECT item_code, item_name FROM item_master WHERE item_id = %s", [item_id])
             item_row = cursor.fetchone()
 
             if not item_row:
                 logger.warning(f"No item details found for item ID {item_id}")
                 return JsonResponse({'error': 'Item details not found'}, status=404)
+
+            cursor.execute(
+                "SELECT mould_weight FROM mould_master WHERE line_no = %s AND status = TRUE LIMIT 1;",
+                [line_no])
+            mould_row = cursor.fetchone()
+            mould_weight = mould_row[0] if mould_row else None
 
             item_code, item_name = item_row
             data = {
@@ -969,6 +998,8 @@ def get_product_details_by_order(request, production_order_no):
                 'mfg_date': mfg_date.strftime('%Y-%m-%d'),
                 'exp_date': exp_date.strftime('%Y-%m-%d'),
                 'qty': qty,
+                'polybag_weight': polybag_weight,
+                'mould_weight': mould_weight
             }
             return JsonResponse(data)
 
@@ -981,7 +1012,7 @@ def find_weighing_scale_port():
     ports = serial.tools.list_ports.comports()
     for port in ports:
         logging.debug(f"Checking port: {port.device} with description: {port.description}")
-        if 'USB-SERIAL CH340' in port.description:
+        if 'USB' in port.description:
             logging.debug(f"Found port: {port.device}")
             return port.device
     return None
@@ -1020,20 +1051,17 @@ def read_port(ser):
     return None
 
 
-def get_tolerance_value():
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT lower_tolerance, upper_tolerance, unit FROM tolerance_master WHERE status = TRUE LIMIT 1;")
-            result = cursor.fetchone()
-            if result:
-                lower_tolerance, upper_tolerance, unit = result
-                return Decimal(lower_tolerance), Decimal(upper_tolerance), unit
-            else:
-                return None, None, None
-    except Exception as e:
-        logging.error(f"Error fetching tolerance values: {e}")
-        return None, None, None
+@csrf_exempt
+def get_tolerance_value(request):
+    lower_tolerance, upper_tolerance, unit = get_tolerance_value_from_db()
+    if lower_tolerance is None or upper_tolerance is None or unit is None:
+        return JsonResponse({'error': 'Tolerance values not found.'}, status=404)
+
+    return JsonResponse({
+        'lower_tolerance': float(lower_tolerance),
+        'upper_tolerance': float(upper_tolerance),
+        'unit': unit
+    })
 
 
 def get_mould_weight(request):
@@ -1094,46 +1122,7 @@ def get_weight(request):
 
             if weight is not None:
                 logging.info(f"Weight received from the scale: {weight} kg")
-
-                lower_tolerance, upper_tolerance, unit = get_tolerance_value()
-                if lower_tolerance is None or upper_tolerance is None or unit is None:
-                    return JsonResponse({'error': "Tolerance values not found."}, status=500)
-
-                if unit.lower() == 'gm':
-                    lower_tolerance /= Decimal(1000)
-                    upper_tolerance /= Decimal(1000)
-
-                # Fetch polybag weight from the production_order table
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        SELECT polybag_weight FROM production_order WHERE production_order_number = %s
-                        """, [po_no]
-                    )
-                    result = cursor.fetchone()
-                    if result is None:
-                        return JsonResponse({'error': 'Production Order not found.'}, status=404)
-                    polybag_weight = Decimal(result[0])
-
-                mould_weight = get_mould_weight(request)
-                if mould_weight is None:
-                    return JsonResponse({'error': "Mould weight not found."}, status=500)
-                mould_weight = Decimal(mould_weight)
-                total_weight = polybag_weight + mould_weight
-
-                tolerance_lower = total_weight - lower_tolerance
-                tolerance_upper = total_weight + upper_tolerance
-
-                logging.info(f"Tolerance range: {tolerance_lower} kg to {tolerance_upper} kg")
-
-                if tolerance_lower <= Decimal(weight) <= tolerance_upper:
-                    logging.info(
-                        f"Weight {weight} kg is within the tolerance range ({tolerance_lower} kg - {tolerance_upper} kg)")
-                    return JsonResponse({'weight': weight})
-                else:
-                    error_message = f"Weight {weight} kg is out of tolerance range ({tolerance_lower} kg - {tolerance_upper} kg)."
-                    logging.error(error_message)
-                    return JsonResponse({'error': error_message})
+                return JsonResponse({'weight': weight})
             else:
                 error_message = "Could not read weight from the weighing scale."
                 logging.error(error_message)
@@ -1147,22 +1136,37 @@ def get_weight(request):
         logging.error(error_message)
         return JsonResponse({'error': error_message})
 
+def get_tolerance_value_from_db():
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT lower_tolerance, upper_tolerance, unit FROM tolerance_master WHERE status = TRUE LIMIT 1;"
+            )
+            result = cursor.fetchone()
+            if result:
+                lower_tolerance, upper_tolerance, unit = result
+                return lower_tolerance, upper_tolerance, unit
+            else:
+                return None, None, None
+    except Exception as e:
+        logging.error(f"Error fetching tolerance values: {e}")
+        return None, None, None
+
 
 @csrf_exempt
 def generate_prn(request):
+    logging.info("generate_prn called with data: %s", request.POST)
     try:
-        # Session data retrieval
         line_number = request.session.get('line_number')
         username = request.session.get('username')
         created_by = request.session.get('user_id')
 
         if not created_by:
-            logger.error("Error: Created by (user ID) is missing.")
+            logging.error("Error: Created by (user ID) is missing.")
             return JsonResponse({'status': 'error', 'message': 'User ID is missing. Please login again.'}, status=401)
 
-        # Request handling for POST method
         if request.method == 'POST':
-            logger.info("Received POST data: %s", request.POST)
+            logging.info("Received POST data: %s", request.POST)
             batch = request.POST.get('batch')
             item_code = request.POST.get('item_code')
             item_name = request.POST.get('item_name')
@@ -1173,16 +1177,17 @@ def generate_prn(request):
             po_no = request.POST.get('production_order_no')
 
             if not po_no:
-                logger.error("Production Order Number is required.")
+                logging.error("Production Order Number is required.")
                 return JsonResponse({'status': 'error', 'message': 'Production Order Number is required.'}, status=400)
 
             current_month_year = datetime.now().strftime("%m%y")
 
-            # Retrieve tolerance values and unit
-            lower_tolerance, upper_tolerance, unit = get_tolerance_value()
+            lower_tolerance, upper_tolerance, unit = get_tolerance_value_from_db()
             if lower_tolerance is None or upper_tolerance is None or unit is None:
-                logger.error("Tolerance values not found.")
+                logging.error("Tolerance values not found.")
                 return JsonResponse({'status': 'error', 'message': 'Tolerance values not found.'}, status=500)
+
+            logging.info("Fetched tolerance values from DB: %s, %s, %s", lower_tolerance, upper_tolerance, unit)
 
             lower_tolerance = Decimal(lower_tolerance)
             upper_tolerance = Decimal(upper_tolerance)
@@ -1191,7 +1196,8 @@ def generate_prn(request):
                 lower_tolerance /= Decimal(1000)
                 upper_tolerance /= Decimal(1000)
 
-            # Fetch polybag weight from the production_order table
+            logging.info("Converted tolerance values to kg: %s, %s", lower_tolerance, upper_tolerance)
+
             try:
                 with connection.cursor() as cursor:
                     cursor.execute(
@@ -1201,69 +1207,64 @@ def generate_prn(request):
                     )
                     result = cursor.fetchone()
                     if result is None:
-                        logger.error("Production Order not found.")
+                        logging.error("Production Order not found.")
                         return JsonResponse({'status': 'error', 'message': 'Production Order not found.'}, status=404)
                     polybag_weight = Decimal(result[0])
             except Exception as e:
-                logger.error("Error fetching polybag weight: %s", e)
+                logging.error("Error fetching polybag weight: %s", e)
                 return JsonResponse({'status': 'error', 'message': 'Error fetching polybag weight.'}, status=500)
 
-            # Calculate total weight with mould weight
             try:
                 mould_weight = get_mould_weight(request)
                 if mould_weight is None:
-                    logger.error("Mould weight not found.")
+                    logging.error("Mould weight not found.")
                     return JsonResponse({'status': 'error', 'message': 'Mould weight not found.'}, status=500)
                 mould_weight = Decimal(mould_weight)
                 total_weight = polybag_weight + mould_weight
             except Exception as e:
-                logger.error("Error calculating mould weight: %s", e)
+                logging.error("Error calculating mould weight: %s", e)
                 return JsonResponse({'status': 'error', 'message': 'Error calculating mould weight.'}, status=500)
 
-            # Calculate tolerance range
             tolerance_lower = total_weight - lower_tolerance
             tolerance_upper = total_weight + upper_tolerance
 
-            # Check if weight is within tolerance range
+            logging.info("Weight: %s, Tolerance range: %s - %s", weight, tolerance_lower, tolerance_upper)
+
             if tolerance_lower <= weight <= tolerance_upper:
                 directory = os.path.join('D:', 'WMS_sample_updated', 'WMS-PRN')
                 if not os.path.exists(directory):
                     os.makedirs(directory)
 
-                # Retrieve line number from session
                 line_number = request.session.get('line_number')
                 if not line_number:
-                    logger.error("Line number not found in session.")
+                    logging.error("Line number not found in session.")
                     return JsonResponse({'status': 'error', 'message': 'Line number not found in session.'}, status=500)
 
-                # Retrieve printer details
                 try:
                     ip, port = get_printer_details(line_number)
                     if ip is None or port is None:
-                        logger.error("Printer details not found.")
+                        logging.error("Printer details not found.")
                         return JsonResponse({'status': 'error', 'message': 'Printer details not found.'}, status=500)
                 except Exception as e:
-                    logger.error("Error retrieving printer details: %s", e)
+                    logging.error("Error retrieving printer details: %s", e)
                     return JsonResponse({'status': 'error', 'message': 'Error retrieving printer details.'}, status=500)
 
                 successful_prints = 0
                 qr_codes = []
 
                 try:
-                    # Socket communication with printer
-                    logger.info("Attempting to connect to printer at %s:%s", ip, port)
+                    logging.info("Attempting to connect to printer at %s:%s", ip, port)
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.settimeout(5)  # Set a timeout for socket operations (adjust as needed)
+                        s.settimeout(5)
                         try:
                             s.connect((ip, port))
-                            logger.info("Connected to printer at %s:%s", ip, port)
+                            logging.info("Connected to printer at %s:%s", ip, port)
                         except socket.error as e:
-                            logger.error("Failed to connect to printer: %s", e)
+                            logging.error("Failed to connect to printer: %s", e)
                             return JsonResponse({'status': 'error',
                                                  'message': 'Failed to connect to printer. Please check if the printer is on and connected.'},
                                                 status=500)
 
-                        # Retrieve the last serial number printed for this PO, item, and batch
                         try:
                             with connection.cursor() as cursor:
                                 cursor.execute(
@@ -1278,7 +1279,7 @@ def generate_prn(request):
                                 if last_serial is None:
                                     last_serial = 0
                         except Exception as e:
-                            logger.error("Error retrieving last serial number: %s", e)
+                            logging.error("Error retrieving last serial number: %s", e)
                             return JsonResponse({'status': 'error', 'message': 'Error retrieving last serial number.'},
                                                 status=500)
 
@@ -1287,7 +1288,6 @@ def generate_prn(request):
                         qr_code = f"P{item_code}{current_month_year}{batch}{serial_number_counter:04d}"
                         qr_codes.append(qr_code)
 
-                        # Generate PRN content
                         prn_content = f"""Seagull:2.1:DP
                         INPUT OFF
                         VERBOFF
@@ -1340,26 +1340,26 @@ def generate_prn(request):
                             s.sendall(file.read())
 
                         successful_prints += 1
+                        logging.info("Print job sent successfully")
 
                 except socket.timeout as e:
-                    logger.error("Socket operation timed out: %s", e)
+                    logging.error("Socket operation timed out: %s", e)
                     return JsonResponse({'status': 'error',
                                          'message': 'Socket operation timed out. Please check the printer connection.'},
                                         status=500)
 
                 except socket.error as e:
-                    logger.error("Failed to send data to printer: %s", e)
+                    logging.error("Failed to send data to printer: %s", e)
                     return JsonResponse({'status': 'error',
                                          'message': 'Failed to send data to printer. Please check the printer connection.'},
                                         status=500)
 
                 except Exception as e:
-                    logger.error("Error during printer communication: %s", e)
+                    logging.error("Error during printer communication: %s", e)
                     return JsonResponse({'status': 'error',
                                          'message': 'Error during printer communication. Please check the printer connection.'},
                                         status=500)
 
-                # Update database with printed labels
                 if successful_prints > 0:
                     printed_by = request.session.get('user_id')
                     printed_date = datetime.now()
@@ -1383,7 +1383,6 @@ def generate_prn(request):
                                 [po_no, batch, item_code, 1, qr_code, printed_by, printed_date]
                             )
 
-                            # Fetch total quantity of labels printed
                             cursor.execute(
                                 """
                                 SELECT COUNT(*) FROM label_printing WHERE po_no = %s
@@ -1391,7 +1390,6 @@ def generate_prn(request):
                             )
                             total_labels = cursor.fetchone()[0]
 
-                            # Update no_of_labels and polybag_print_status if all labels are printed
                             cursor.execute(
                                 """
                                 UPDATE production_order
@@ -1401,29 +1399,29 @@ def generate_prn(request):
                                 [total_labels, total_labels, int(qty / total_weight), po_no]
                             )
 
+                        logging.info("PRN file sent to printer successfully. %s prints generated.", successful_prints)
                         return JsonResponse({'status': 'success',
                                              'message': f'PRN file sent to printer successfully. {successful_prints} prints generated.',
                                              'num_prints': successful_prints})
 
                     except Exception as e:
-                        logger.error("Error updating database: %s", e)
+                        logging.error("Error updating database: %s", e)
                         return JsonResponse({'status': 'error', 'message': 'Error updating database.'}, status=500)
 
             else:
-                logger.error(
+                logging.error(
                     f"Weight {weight} kg is out of tolerance range ({tolerance_lower} kg - {tolerance_upper} kg).")
                 return JsonResponse({'status': 'error',
                                      'message': f'Weight {weight} kg is out of tolerance range ({tolerance_lower} kg - {tolerance_upper} kg).'})
 
         else:
-            logger.error("Invalid request method.")
+            logging.error("Invalid request method.")
             return JsonResponse({'status': 'error', 'message': 'Invalid request method.'}, status=400)
 
     except Exception as e:
-        logger.error("Unhandled exception: %s", e)
+        logging.error("Unhandled exception: %s", e)
         return JsonResponse({'status': 'error', 'message': 'An unexpected error occurred. Please try again later.'},
                             status=500)
-
 
 def handle_request(request):
     if request.method == 'POST':
@@ -2433,3 +2431,52 @@ def save_remark(request):
         return JsonResponse({'success': True})
 
     return JsonResponse({'success': False})
+
+
+
+def get_archived_production_order_list(request):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM get_archived_polist()")
+        data = cursor.fetchall()
+        archived_orders = []
+        for row in data:
+            archived_orders.append({
+                'production_order_number': row[0],
+                'item_code': row[1],
+                'product_name': row[2],
+                'batch': row[3],
+                'item_mrp': row[4],
+                'mfg_date': row[5].strftime('%Y-%m-%d'),
+                'exp_date': row[6].strftime('%Y-%m-%d'),
+                'line_no': row[7],
+                'qty': row[8],
+                'added_by': row[9],
+                'added_date': row[10].strftime('%d-%m-%Y'),
+                'polybag_weight': row[11],
+                'polybag_print_status': row[12]  # Add this field
+            })
+
+    return JsonResponse(archived_orders, safe=False)
+def get_production_order_list(request):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM get_polist()")
+        data = cursor.fetchall()
+        production_orders = []
+        for row in data:
+            production_orders.append({
+                'production_order_number': row[0],
+                'item_code': row[1],
+                'product_name': row[2],
+                'batch': row[3],
+                'item_mrp': row[4],
+                'mfg_date': row[5].strftime('%Y-%m-%d'),
+                'exp_date': row[6].strftime('%Y-%m-%d'),
+                'line_no': row[7],
+                'qty': row[8],
+                'added_by': row[9],
+                'added_date': row[10].strftime('%d-%m-%Y'),
+                'polybag_weight': row[11],
+                'polybag_print_status': row[12]  # Add this field
+            })
+
+    return JsonResponse(production_orders, safe=False)
