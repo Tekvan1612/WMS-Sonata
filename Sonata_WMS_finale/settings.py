@@ -78,13 +78,26 @@ WSGI_APPLICATION = 'Sonata_WMS_finale.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'sonata_wms1',
+#         'USER': 'postgres',
+#         'PASSWORD': 'sonata',
+#         'HOST': '192.168.3.202',
+#         'Port': '5432',
+#
+#     }
+# }
+
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'sonata_wms1',
+        'NAME': 'sonata0607',
         'USER': 'postgres',
-        'PASSWORD': 'sonata',
-        'HOST': '192.168.3.202',
+        'PASSWORD': 'kvan',
+        'HOST': '192.168.1.69',
         'Port': '5432',
 
     }
