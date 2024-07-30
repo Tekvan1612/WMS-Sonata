@@ -241,28 +241,34 @@
     <div class="modal fade" id="editProductionOrderModal" tabindex="-1"
          aria-labelledby="editProductionOrderModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <!-- Added 'modal-lg' and 'modal-dialog-scrollable' -->
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="editProductionOrderModalLabel">Edit Production Order</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <h5 class="modal-title" id="editProductionOrderModalLabel">Edit Production
+                        Order</h5>
                 </div>
-                <div class="modal-body">
-                    <form id="editProductionOrderForm">
+                <div class="modal-body" style="max-height: 80vh; overflow-y: auto;">
+                    <!-- Inline style for max-height and scroll -->
+                    <form id="editProductionOrderForm" class="d-flex flex-column">
                         <input type="hidden" id="edit-production-order-number">
                         <div class="form-floating mb-3">
-                            <select class="form-select" id="edit-select-item" aria-label="Select Item Code"></select>
+                            <select class="form-select w-100" id="edit-select-item"
+                                    aria-label="Select Item Code"></select>
                             <label for="edit-select-item">Item Code</label>
                         </div>
                         <div class="form-floating mb-3">
-                            <textarea class="form-control" id="edit-product-name" rows="3" placeholder="Enter Item Name" readonly></textarea>
+                                                <textarea class="form-control" id="edit-product-name" rows="3"
+                                                          placeholder="Enter Item Name" readonly></textarea>
                             <label for="edit-product-name">Item Name</label>
                         </div>
                         <div class="form-floating mb-3">
-                            <input type="text" class="form-control" id="edit-batch" placeholder="Enter Batch">
+                            <input type="text" class="form-control" id="edit-batch"
+                                   placeholder="Enter Batch">
                             <label for="edit-batch">Item Batch</label>
                         </div>
                         <div class="form-floating mb-3">
-                            <input type="number" class="form-control" id="edit-mrp" placeholder="Enter MRP">
+                            <input type="number" class="form-control" id="edit-mrp"
+                                   placeholder="Enter MRP">
                             <label for="edit-mrp">Item MRP</label>
                         </div>
                         <div class="form-floating mb-3">
@@ -274,19 +280,24 @@
                             <label for="edit-exp-date">EXP Date</label>
                         </div>
                         <div class="form-floating mb-3">
-                            <input type="number" class="form-control" id="edit-qty" placeholder="Enter Quantity">
+                            <input type="number" class="form-control" id="edit-qty"
+                                   placeholder="Enter Quantity">
                             <label for="edit-qty">QTY</label>
                         </div>
                         <div class="form-floating mb-3">
-                            <select class="form-select" id="edit-line-no" aria-label="Select Line Number"></select>
+                            <select class="form-select w-100" id="edit-line-no"
+                                    aria-label="Select Line Number"></select>
                             <label for="edit-line-no">Line Number</label>
                         </div>
                         <div class="form-floating mb-3">
-                            <input type="text" class="form-control" id="edit-polybag-weight" placeholder="Enter Weight">
+                            <input type="text" class="form-control" id="edit-polybag-weight"
+                                   placeholder="Enter Weight">
                             <label for="edit-polybag-weight">Polybag Weight</label>
                         </div>
                         <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                                Close
+                            </button>
                             <button type="submit" class="btn btn-primary">Save Changes</button>
                         </div>
                     </form>
@@ -338,7 +349,7 @@
                         selectItem.empty();
                         selectItem.append('<option></option>');
                         data.forEach(function (item) {
-                            var option = '<option value="' + item.item_code + '" data-item-id="' + item.item_id + '" data-item-name="' + item.item_name + '">' + item.item_code + '</option>';
+                            var option = '<option value="' + item.item_code + '" data-item-id="' + item.item_id + '" data-item-name="' + item.item_name + '" data-item-weight="' + item.item_weight + '">' + item.item_code + '</option>';
                             selectItem.append(option);
                         });
                     },
@@ -476,13 +487,17 @@
             $('#select-item').change(function () {
                 var selectedItem = $(this).find(':selected');
                 var itemName = selectedItem.data('item-name');
+                var itemWeight = selectedItem.data('item-weight');
                 $('#product-name').val(itemName);
+                $('#polybag-weight').val(itemWeight);
             });
 
             $('#edit-select-item').change(function () {
                 var selectedItem = $(this).find(':selected');
                 var itemName = selectedItem.data('item-name');
+                var itemWeight = selectedItem.data('item-weight');
                 $('#edit-product-name').val(itemName);
+                $('#edit-polybag-weight').val(itemWeight);
             });
 
             $('#productionOrderForm').submit(function (e) {
@@ -501,91 +516,28 @@
                 };
 
                 $.ajax({
-                    url: '/create_production_order/',
+                    url: '/add_production_order/',
                     type: 'POST',
-                    headers: {'X-CSRFToken': getCookie('csrftoken')},
-                    data: formData,
+                    data: JSON.stringify(formData),
+                    contentType: 'application/json',
                     success: function (response) {
-                        if (response.status === 'success') {
-                            alert('Production Order ' + response.production_order_number + ' added to Order List');
-                            populateProductionOrderList();
-                            $('#productionOrderForm')[0].reset();
-                            $('#select-item').val(null).trigger('change');
-                        } else {
-                            alert('Error: ' + response.message);
-                        }
+                        $('#productionOrderForm')[0].reset();
+                        populateProductionOrderList();
+                        alert('Production Order added successfully!');
                     },
                     error: function (xhr, status, error) {
-                        var response = JSON.parse(xhr.responseText);
-                        alert('Error: ' + response.message);
+                        console.error('Error adding production order:', error);
+                        alert('Error adding production order');
                     }
                 });
             });
-
-            function getCookie(name) {
-                let cookieValue = null;
-                if (document.cookie && document.cookie !== '') {
-                    const cookies = document.cookie.split(';');
-                    for (let i = 0; i < cookies.length; i++) {
-                        const cookie = cookies[i].trim();
-                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                            break;
-                        }
-                    }
-                }
-                return cookieValue;
-            }
-
-            window.editOrder = function (productionOrderNumber) {
-                var order = $('#production-order-list tbody tr').filter(function () {
-                    return $(this).find('td:first').text() == productionOrderNumber;
-                }).find('td');
-
-                $.ajax({
-                    url: '/check_polybag_status/',
-                    type: 'GET',
-                    data: {
-                        production_order_number: productionOrderNumber
-                    },
-                    success: function (response) {
-                        if (response.polybag_status) {
-                            alert('Cannot edit Production Order. Label Printing done for this Production Order Number.');
-                        } else {
-                            var itemCode = order.eq(1).text().trim();
-                            var itemName = order.eq(2).text().trim();
-
-                            $('#edit-production-order-number').val(productionOrderNumber);
-
-                            var newOption = new Option(itemCode, itemCode, true, true);
-                            $('#edit-select-item').empty().append(newOption).trigger('change');
-                            $('#edit-product-name').val(itemName);
-
-                            $('#edit-batch').val(order.eq(3).text());
-                            $('#edit-mrp').val(order.eq(4).text());
-                            $('#edit-mfg-date').val(order.eq(5).text());
-                            $('#edit-exp-date').val(order.eq(6).text());
-                            $('#edit-qty').val(order.eq(8).text());
-                            // Remove "Kg" suffix before setting the value
-                            var polybagWeight = order.eq(9).text().replace(' Kg', '');
-                            $('#edit-polybag-weight').val(polybagWeight);
-                            $('#edit-line-no').val(order.eq(7).text());
-
-                            $('#editProductionOrderModal').modal('show');
-                        }
-                    },
-                    error: function (xhr, status, error) {
-                        console.error('Error checking polybag status:', error);
-                    }
-                });
-            };
 
             $('#editProductionOrderForm').submit(function (e) {
                 e.preventDefault();
 
                 var formData = {
                     'production_order_number': $('#edit-production-order-number').val(),
-                    'item_code': $('#edit-select-item').val(),  // Send item_code instead of item_id
+                    'item_code': $('#edit-select-item').val(),
                     'batch': $('#edit-batch').val(),
                     'item_mrp': $('#edit-mrp').val(),
                     'mfg_date': $('#edit-mfg-date').val(),
@@ -599,15 +551,17 @@
                 $.ajax({
                     url: '/update_production_order/',
                     type: 'POST',
-                    headers: {'X-CSRFToken': '{{ csrf_token }}'},
-                    data: formData,
+                    data: JSON.stringify(formData),
+                    contentType: 'application/json',
                     success: function (response) {
-                        alert('Production Order updated successfully');
+                        $('#editProductionOrderForm')[0].reset();
                         $('#editProductionOrderModal').modal('hide');
                         populateProductionOrderList();
+                        alert('Production Order updated successfully!');
                     },
                     error: function (xhr, status, error) {
                         console.error('Error updating production order:', error);
+                        alert('Error updating production order');
                     }
                 });
             });
@@ -615,25 +569,31 @@
             populateSelectItem();
             populateSelectLineNo();
             populateProductionOrderList();
-
-            var today = new Date();
-            var yyyy = today.getFullYear();
-            var mm = String(today.getMonth() + 1).padStart(2, '0');
-            var dd = String(today.getDate()).padStart(2, '0');
-
-            var currentDate = yyyy + '-' + mm + '-' + dd;
-
-            var tomorrow = new Date(today);
-            tomorrow.setDate(today.getDate() + 1);
-            var yyyy_tomorrow = tomorrow.getFullYear();
-            var mm_tomorrow = String(tomorrow.getMonth() + 1).padStart(2, '0');
-            var dd_tomorrow = String(tomorrow.getDate()).padStart(2, '0');
-
-            var nextDate = yyyy_tomorrow + '-' + mm_tomorrow + '-' + dd_tomorrow;
-
-            $('#mfg-date').attr('max', currentDate);
-            $('#exp-date').attr('min', nextDate);
         });
+
+        function editOrder(productionOrderNumber) {
+            $.ajax({
+                url: '/get_production_order_details/',
+                type: 'GET',
+                data: {'production_order_number': productionOrderNumber},
+                success: function (order) {
+                    $('#edit-production-order-number').val(order.production_order_number);
+                    $('#edit-select-item').val(order.item_code).trigger('change');
+                    $('#edit-product-name').val(order.product_name);
+                    $('#edit-batch').val(order.batch);
+                    $('#edit-mrp').val(order.item_mrp);
+                    $('#edit-mfg-date').val(order.mfg_date);
+                    $('#edit-exp-date').val(order.exp_date);
+                    $('#edit-qty').val(order.qty);
+                    $('#edit-polybag-weight').val(order.polybag_weight);
+                    $('#edit-line-no').val(order.line_no).trigger('change');
+                    $('#editProductionOrderModal').modal('show');
+                },
+                error: function (xhr, status, error) {
+                    console.error('Error fetching production order details:', error);
+                }
+            });
+        }
     </script>
 
     <style>

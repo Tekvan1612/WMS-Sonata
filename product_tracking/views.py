@@ -326,42 +326,36 @@ def add_item(request):
     line_number = request.session.get('line_number', 'N/A')
     username = request.session.get('username', 'N/A')
     created_by = request.session.get('user_id')
-    # Ensure you're getting the username from session
-
-    print('created_by', created_by)
 
     if request.method == 'POST':
         item_code = request.POST.get('item_code')
         item_name = request.POST.get('item_name')
         item_uom = request.POST.get('item_uom')
         item_igcode = request.POST.get('item_igcode')
-        status = request.POST.get('status', 'true') == 'true'  # Default to true if not provided
-        # created_by = request.session.get('user_id')  # Assuming user ID is stored in session
+        status = request.POST.get('status', 'true') == 'true'
         created_date = datetime.now()
+        grade = request.POST.get('grade')  # new fields
+        item_weight = request.POST.get('item_weight')  # new fields
 
-        # Check if created_by is not None or empty
         if not created_by:
-            print("Error: Created by (user ID) is missing.")
-            messages.error(request, "Your session may have expired. Please login again.")
-            return redirect('product_tracking:login_view')
+            return JsonResponse({'message': 'Your session may have expired. Please login again.'}, status=400)
 
-        print("Attempting to add new item:")
-        print(f"Code: {item_code}, Name: {item_name}, UOM: {item_uom}, IGCode: {item_igcode}, Status: {status}")
-        print(f"Created by: {created_by}, Date: {created_date}")
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT item_code FROM item_master WHERE item_code = %s", [item_code])
+                existing_item = cursor.fetchone()
+                if existing_item:
+                    return JsonResponse({'message': 'Item code already exists'}, status=400)
 
-        with connection.cursor() as cursor:
-            try:
                 cursor.execute(
-                    "SELECT add_item(%s::varchar, %s::varchar, %s::varchar, %s::varchar, %s::boolean, %s::integer, %s::timestamp);",
-                    [item_code, item_name, item_uom, item_igcode, status, created_by, created_date]
+                    "SELECT add_item(%s::varchar, %s::varchar, %s::varchar, %s::varchar, %s::boolean, %s::integer, %s::timestamp, %s::varchar, %s::numeric);",
+                    [item_code, item_name, item_uom, item_igcode, status, created_by, created_date, grade, item_weight]
                 )
                 item_id = cursor.fetchone()[0]
-                messages.success(request, f"Item added successfully, Item ID: {item_id}")
-                print("Item added successfully, Item ID:", item_id)
-                return redirect('product_tracking:add_item')
-            except Exception as e:
-                print("Failed to add item:", e)
-                messages.error(request, "Failed to add item due to an error.")
+                return JsonResponse({'message': 'Item added successfully', 'item_id': item_id})
+
+        except Exception as e:
+            return JsonResponse({'message': str(e)}, status=500)
 
     return render(request, 'product_tracking/product-master.html', {'username': username, 'line_number': line_number})
 
@@ -384,7 +378,9 @@ def item_list(request):
             'status': item[5],
             'created_by': item[8],
             'created_date_time': created_date_time,
-            'user_name': item[8]
+            'user_name': item[8],
+            'grade': item[9],
+            'item_weight': item[10]
         })
 
     return JsonResponse(item_listing, safe=False)
@@ -403,11 +399,14 @@ def update_item(request, item_id):
         status = request.POST.get('status') == 'true'
         updated_by = request.session.get('user_id')
         updated_date = datetime.now()
+        grade = request.POST.get('grade')  # new fields
+        item_weight = request.POST.get('item_weight')  # new fields
 
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT update_item(%s::integer, %s::varchar, %s::varchar, %s::varchar, %s::varchar, %s::boolean, %s::integer, %s::timestamp);",
-                [item_id, item_code, item_name, item_uom, item_igcode, status, updated_by, updated_date])
+                "SELECT update_item(%s::integer, %s::varchar, %s::varchar, %s::varchar, %s::varchar, %s::boolean, %s::integer, %s::timestamp, %s::varchar, %s::numeric);",
+                [item_id, item_code, item_name, item_uom, item_igcode, status, updated_by, updated_date, grade,
+                 item_weight])  # new fields 'grade' 'item_weight'
 
         return JsonResponse({'status': 'success'})
     else:
@@ -423,6 +422,8 @@ def update_item(request, item_id):
                 'item_uom': item[3],
                 'item_igcode': item[4],
                 'status': item[5],
+                'grade': item[8],  # new
+                'item_weight': item[9]  # new
             }
             return JsonResponse(item_data)
         else:
@@ -444,9 +445,9 @@ def delete_item(request, item_id):
 
 def get_item_code(request):
     with connection.cursor() as cursor:
-        cursor.execute("SELECT item_id, item_code, item_name FROM item_master WHERE status = TRUE")
+        cursor.execute("SELECT item_id, item_code, item_name, item_weight FROM item_master WHERE status = TRUE")
         items = cursor.fetchall()
-        item_list = [{'item_id': item[0], 'item_code': item[1], 'item_name': item[2]} for item in items]
+        item_list = [{'item_id': item[0], 'item_code': item[1], 'item_name': item[2], 'item_weight': item[3]} for item in items]
     return JsonResponse(item_list, safe=False)
 
 
@@ -498,40 +499,31 @@ def create_production_order(request):
                           ['item_code', 'batch', 'item_mrp', 'mfg_date', 'exp_date', 'qty', 'polybag_weight', 'line_no',
                            'product_name'] if not request.POST.get(field)]
         if missing_fields:
-            print(f"Missing fields: {missing_fields}")
             return JsonResponse({'status': 'error', 'message': f'Missing fields: {", ".join(missing_fields)}'},
                                 status=400)
 
-        # Validate field formats
         try:
             qty = int(qty)
         except ValueError:
-            print("Invalid quantity format.")
             return JsonResponse({'status': 'error', 'message': 'Invalid quantity format.'}, status=400)
 
         try:
-            polybag_weight = float(polybag_weight)
-        except ValueError:
-            print("Invalid polybag weight format.")
-            return JsonResponse({'status': 'error', 'message': 'Invalid polybag weight format.'}, status=400)
-
-        try:
             with connection.cursor() as cursor:
+                # Check if the batch already exists for the given item code
+                cursor.execute(
+                    "SELECT po_id FROM production_order WHERE item_id = (SELECT item_id FROM item_master WHERE item_code = %s) AND batch = %s",
+                    [item_code, batch])
+                existing_order = cursor.fetchone()
+                if (existing_order):
+                    return JsonResponse(
+                        {'status': 'error', 'message': 'Batch Code is already exists for this Item Code'}, status=400)
+
+                # Get the item_id for the given item_code
                 cursor.execute("SELECT item_id FROM item_master WHERE item_code = %s", [item_code])
                 item = cursor.fetchone()
                 if not item:
-                    print("Invalid item code.")
                     return JsonResponse({'status': 'error', 'message': 'Invalid item code.'}, status=400)
                 item_id = item[0]
-
-                # Check for duplicate item id and batch
-                cursor.execute("SELECT COUNT(*) FROM production_order WHERE item_id = %s AND batch = %s",
-                               [item_id, batch])
-                duplicate_count = cursor.fetchone()[0]
-                if duplicate_count > 0:
-                    print("Duplicate item code and batch not allowed.")
-                    return JsonResponse({'status': 'error', 'message': 'Duplicate item code and batch not allowed.'},
-                                        status=400)
 
             created_date = datetime.now()
 
@@ -540,12 +532,13 @@ def create_production_order(request):
 
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT create_production_order(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "SELECT create_production_order(%s::integer, %s::character varying, %s::character varying, %s::date, %s::date, %s::integer, %s::integer, %s:: timestamp without time zone, %s::character varying, %s::character varying, %s::numeric)",
                     [
                         item_id, batch, item_mrp, mfg_date, exp_date, qty, created_by, created_date, product_name,
                         line_no, polybag_weight
                     ])
-                production_order_number = cursor.fetchone()[0]  # Fetch the returned production order number
+                production_order_number = cursor.fetchone()[0]
+            print("PO Number: ", production_order_number)
 
             return JsonResponse({'status': 'success', 'message': 'Production order created successfully',
                                  'production_order_number': production_order_number})
@@ -562,6 +555,7 @@ def get_production_order_list(request):
     with connection.cursor() as cursor:
         cursor.execute("SELECT * FROM get_polist()")
         data = cursor.fetchall()
+        print("Production Order List Data:", data)
         production_orders = []
         for row in data:
             production_orders.append({
@@ -576,94 +570,38 @@ def get_production_order_list(request):
                 'qty': row[8],
                 'added_by': row[9],
                 'added_date': row[10].strftime('%d-%m-%Y'),
-                'polybag_weight': row[11]
+                'polybag_weight': row[11],
+                'polybag_print_status': row[12]  # Add this field
             })
-
+        print("Production Order List Row:", row)
     return JsonResponse(production_orders, safe=False)
 
 
-@csrf_exempt
-def update_production_order(request):
-    line_number = request.session.get('line_number', 'N/A')
-    username = request.session.get('username', 'N/A')
-    created_by = request.session.get('user_id')  # Retrieve the user_id from the session
+def get_archived_production_order_list(request):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT * FROM get_archived_polist()")
+        data = cursor.fetchall()
+        print("Production Order List Archived Data:", data)
+        archived_orders = []
+        for row in data:
+            archived_orders.append({
+                'production_order_number': row[0],
+                'item_code': row[1],
+                'product_name': row[2],
+                'batch': row[3],
+                'item_mrp': row[4],
+                'mfg_date': row[5].strftime('%Y-%m-%d'),
+                'exp_date': row[6].strftime('%Y-%m-%d'),
+                'line_no': row[7],
+                'qty': row[8],
+                'added_by': row[9],
+                'added_date': row[10].strftime('%d-%m-%Y'),
+                'polybag_weight': row[11],
+                'polybag_print_status': row[12]  # Add this field
+            })
+        print("Production Order List Archived Row:", row)
 
-    if not created_by:
-        messages.error(request, "Your session may have expired. Please login again.")
-        return redirect(reverse('product_tracking:login_view'))
-
-    if request.method == 'POST':
-        try:
-            production_order_number = request.POST.get('production_order_number')
-            item_code = request.POST.get('item_code')
-            batch = request.POST.get('batch')
-            item_mrp = request.POST.get('item_mrp')
-            mfg_date = request.POST.get('mfg_date')
-            exp_date = request.POST.get('exp_date')
-            qty = request.POST.get('qty')
-            polybag_weight = request.POST.get('polybag_weight')
-            line_no = request.POST.get('line_no')
-            product_name = request.POST.get('product_name')
-
-            if not (
-                    production_order_number and item_code and batch and item_mrp and mfg_date and exp_date and qty and polybag_weight and line_no and product_name):
-                logger.error('Missing fields in the request')
-                return JsonResponse({'error': 'All fields are required.'}, status=400)
-
-            # Fetch item_id based on item_code
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    SELECT item_id FROM item_master WHERE item_code = %s
-                """, [item_code])
-                item = cursor.fetchone()
-
-                if not item:
-                    logger.error('Item code %s not found in item_master', item_code)
-                    return JsonResponse({'error': 'Invalid item code.'}, status=400)
-
-                item_id = item[0]
-
-                # Ensure qty and other numeric fields are converted to integer
-                qty = int(qty)
-                polybag_weight = float(polybag_weight)
-
-                cursor.execute("""
-                    SELECT polybag_print_status FROM production_order WHERE production_order_number = %s
-                """, [production_order_number])
-                polybag_status = cursor.fetchone()
-
-                if polybag_status and polybag_status[0]:
-                    logger.error('Polybag print status is true for order %s', production_order_number)
-                    return JsonResponse({'error': 'Cannot edit Production Order. Polybag print status is true.'},
-                                        status=400)
-
-                cursor.execute("""
-                    SELECT update_po(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, [
-                    production_order_number,
-                    item_id,  # Use item_id fetched from item_master
-                    batch,
-                    item_mrp,
-                    mfg_date,
-                    exp_date,
-                    qty,  # Ensure qty is cast to an integer
-                    line_no,
-                    product_name,
-                    polybag_weight
-                ])
-
-                connection.commit()  # Ensure changes are committed
-
-        except DatabaseError as db_error:
-            logger.error('Database error: %s', db_error)
-            return JsonResponse({'error': 'Database error: ' + str(db_error)}, status=500)
-        except Exception as e:
-            logger.error('Internal server error: %s', e)
-            return JsonResponse({'error': 'Internal server error: ' + str(e)}, status=500)
-
-        return JsonResponse({'message': 'Production order updated successfully'})
-
-    return JsonResponse({'error': 'Invalid request method'}, status=400)
+    return JsonResponse(archived_orders, safe=False)
 
 
 @csrf_exempt
@@ -1136,6 +1074,7 @@ def get_weight(request):
         logging.error(error_message)
         return JsonResponse({'error': error_message})
 
+
 def get_tolerance_value_from_db():
     try:
         with connection.cursor() as cursor:
@@ -1422,6 +1361,7 @@ def generate_prn(request):
         logging.error("Unhandled exception: %s", e)
         return JsonResponse({'status': 'error', 'message': 'An unexpected error occurred. Please try again later.'},
                             status=500)
+
 
 def handle_request(request):
     if request.method == 'POST':
@@ -2433,7 +2373,6 @@ def save_remark(request):
     return JsonResponse({'success': False})
 
 
-
 def get_archived_production_order_list(request):
     with connection.cursor() as cursor:
         cursor.execute("SELECT * FROM get_archived_polist()")
@@ -2457,6 +2396,8 @@ def get_archived_production_order_list(request):
             })
 
     return JsonResponse(archived_orders, safe=False)
+
+
 def get_production_order_list(request):
     with connection.cursor() as cursor:
         cursor.execute("SELECT * FROM get_polist()")

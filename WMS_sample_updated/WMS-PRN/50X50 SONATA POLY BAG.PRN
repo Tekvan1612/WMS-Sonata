@@ -27,17 +27,17 @@ Seagull:2.1:DP
                         FONTSIZE 12
                         FONTSLANT 0
                         PT "Batch"
-                        PP229,384:PT "s0007"
+                        PP229,384:PT "S001"
                         PP32,349:PT "Item code"
-                        PP222,349:PT "SONFG002"
+                        PP222,349:PT "SONFG003"
                         PP35,306:PT "EXP.Date"
-                        PP229,306:PT "2024-07-13"
+                        PP229,306:PT "2024-07-12"
                         PP38,269:PT "MRP"
-                        PP232,269:PT "2133"
+                        PP232,269:PT "22"
                         PP39,232:PT "SN#"
-                        PP233,232:PT "0021"
+                        PP233,232:PT "0002"
                         PP142,171:BARSET "QRCODE",1,1,7,2,1
-                        PB "PSONFG0020724s00070021"
+                        PB "PSONFG0030724S0010002"
                         LAYOUT RUN ""
                         PF
                         PRINT KEY OFF

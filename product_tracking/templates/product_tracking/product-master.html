@@ -26,6 +26,8 @@
                                 '<td>' + (index + 1) + '</td>' +
                                 '<td><span>' + item.item_code + '</span></td>' +
                                 '<td><span>' + item.item_name + '</span></td>' +
+                                '<td><span>' + item.grade + '</span></td>' +  //new
+                                '<td><span>' + item.item_weight + '</span></td>' +  //new
                                 '<td><span>' + item.item_uom + '</span></td>' +
                                 '<td><span>' + item.item_igcode + '</span></td>' +
                                 '<td><span>' + (item.status ? 'Active' : 'Inactive') + '</span></td>' +
@@ -33,7 +35,7 @@
                                 '<td><span>' + item.created_date_time + '</span></td>' +
                                 '<td>' +
                                 '<button class="btn btn-sm btn-primary edit-btn me-2"><i class="fa fa-pencil"></i>Edit</button>' +
-                                '<button class="btn btn-sm btn-danger delete-btn"><i class="fa fa-trash"></i>Delete</button>' +
+                                '<button class="btn btn-sm btn-danger delete-btn" style="display: none"><i class="fa fa-trash"></i>Delete</button>' +  //hide delete button
                                 '</td>' +
                                 '</tr>';
                             $('#category-table-body').append(row);
@@ -60,8 +62,11 @@
                             $('#edit-item-uom').val(data.item_uom);
                             $('#edit-item-igcode').val(data.item_igcode);
                             $('#edit-item-status').val(data.status.toString());
+                            $('#edit-grade').val(data.grade); //new
+                            $('#edit-item-weight').val(data.item_weight); //new
                             $('#edit-modal').modal('show');
                         }
+                        console.log("Item Data: ", data)
                     },
                     error: function (xhr, status, error) {
                         console.error('Error fetching item details:', error);
@@ -86,16 +91,28 @@
                     type: 'POST',
                     data: formData,
                     success: function (data) {
-                        if (data.status === 'success') {
+                        if (data.message === 'Item added successfully') {
                             alert('Item Added Successfully');
                             $('#add-form')[0].reset();
                             fetchItemList();
+                        } else if (data.message === 'Item code already exists') {
+                            alert('Item code already exists');
+                            $('#add-form')[0].reset();
                         } else {
-                            alert('Error adding item');
+                            alert(data.message);
+                            $('#add-form')[0].reset();
                         }
                     },
                     error: function (xhr, status, error) {
                         console.error('Error adding item:', error);
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            alert(response.message);
+                            $('#add-form')[0].reset();
+                        } catch (e) {
+                            alert(xhr.responseText);
+                            $('#add-form')[0].reset();
+                        }
                     }
                 });
             });
@@ -109,7 +126,9 @@
                     item_name: $('#edit-item-name').val(),
                     item_uom: $('#edit-item-uom').val(),
                     item_igcode: $('#edit-item-igcode').val(),
-                    status: $('#edit-item-status').val()
+                    status: $('#edit-item-status').val(),
+                    grade: $('#edit-grade').val(), //new
+                    item_weight: $('#edit-item-weight').val() //new
                 };
 
                 $.ajax({
@@ -262,26 +281,36 @@
                                     <div class="mb-3">
                                         <label for="edit-item-code" class="form-label">Item Code</label>
                                         <input type="text" class="form-control" id="edit-item-code" name="item_code"
-                                               required>
+                                               required readonly>
                                     </div>
                                     <div class="mb-3">
                                         <label for="edit-item-name" class="form-label">Item Name</label>
                                         <input type="text" class="form-control" id="edit-item-name" name="item_name"
+                                               required readonly>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="edit-grade" class="form-label">Grade</label>
+                                        <input type="text" class="form-control" id="edit-grade" name="grade"
+                                               required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="edit-item-weight" class="form-label">Item Weight</label>
+                                        <input type="text" class="form-control" id="edit-item-weight" name="item_weight"
                                                required>
                                     </div>
                                     <div class="mb-3">
                                         <label for="edit-item-uom" class="form-label">Item UOM</label>
                                         <input type="text" class="form-control" id="edit-item-uom" name="item_uom"
-                                               required>
+                                               required readonly>
                                     </div>
                                     <div class="mb-3">
                                         <label for="edit-item-igcode" class="form-label">Item IG Code</label>
                                         <input type="text" class="form-control" id="edit-item-igcode" name="item_igcode"
-                                               required>
+                                               required readonly>
                                     </div>
                                     <div class="mb-3">
                                         <label for="edit-item-status" class="form-label">Status</label>
-                                        <select class="form-select" id="edit-item-status" name="status" required>
+                                        <select class="form-select" id="edit-item-status" name="status" required readonly>
                                             <option value="true">Active</option>
                                             <option value="false">Inactive</option>
                                         </select>
@@ -319,6 +348,21 @@
                                                 <input type="text" class="form-control" id="item-name" name="item_name"
                                                        placeholder="Enter Item Name">
                                                 <label for="item-name">Item Name</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-lg-4">
+                                            <div class="form-floating">
+                                                <input type="text" class="form-control" id="grade" name="grade"
+                                                       placeholder="Enter Grade">
+                                                <label for="grade">Grade</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-lg-4">
+                                            <div class="form-floating">
+                                                <input type="text" class="form-control" id="item_weight"
+                                                       name="item_weight"
+                                                       placeholder="Enter Item Weight">
+                                                <label for="item_weight">Item Weight</label>
                                             </div>
                                         </div>
                                         <div class="col-lg-4">
@@ -373,6 +417,8 @@
                                         <th data-ordering="false">SR No.</th>
                                         <th data-ordering="false">Item Code</th>
                                         <th data-ordering="false">Item Name</th>
+                                        <th data-ordering="false">Grade</th>
+                                        <th data-ordering="false">Item Weight</th>
                                         <th data-ordering="false">Item UOM</th>
                                         <th data-ordering="false">Item IG Code</th>
                                         <th>Status</th>
