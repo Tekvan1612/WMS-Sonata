@@ -59,7 +59,7 @@ ROOT_URLCONF = 'Sonata_WMS_finale.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'product_tracking/templates']
+        'DIRS': [BASE_DIR / 'product_tracking' / 'templates']
         ,
         'APP_DIRS': True,
         'OPTIONS': {
@@ -78,26 +78,13 @@ WSGI_APPLICATION = 'Sonata_WMS_finale.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': 'sonata_wms1',
-#         'USER': 'postgres',
-#         'PASSWORD': 'sonata',
-#         'HOST': '192.168.3.202',
-#         'Port': '5432',
-#
-#     }
-# }
-
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'sonata0607',
+        'NAME': 'sonata_wms1',
         'USER': 'postgres',
-        'PASSWORD': 'kvan',
-        'HOST': 'localhost',
+        'PASSWORD': 'sonata',
+        'HOST': '192.168.3.202',
         'Port': '5432',
 
     }
